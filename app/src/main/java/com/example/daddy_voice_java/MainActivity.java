@@ -16,6 +16,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
+import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
@@ -55,7 +56,8 @@ public class MainActivity extends AppCompatActivity {
 
     private ExoPlayer player;
 
-    private WebView resolvingWebView = null;
+    private WebView geoNewsWebView = null;
+    private WebView dunyaNewsWebView = null;
 
 
     @SuppressLint("SetTextI18n")
@@ -71,7 +73,7 @@ public class MainActivity extends AppCompatActivity {
         status.setGravity(Gravity.CENTER);
         int pad = (int) (16 * getResources().getDisplayMetrics().density);
         status.setPadding(pad, pad, pad, pad);
-        status.setText("Press the down volume key and say “Geo News”. Press the up volume key to stop.");
+        status.setText("Press the down volume key and say “Geo News” or “Dunya News”. Press the up volume key to stop.");
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
         params.gravity = Gravity.CENTER;
@@ -109,6 +111,11 @@ public class MainActivity extends AppCompatActivity {
                     playGeoNewsAudio();
                 }
 
+// PLAY DUNYA NEWS?
+                if (norm.contains("dunya news") || norm.contains("dunia news") || norm.contains("duniya news")) {
+                    playDunyaNewsAudio();
+                }
+
                 isListening = false;
 
             }
@@ -131,13 +138,17 @@ public class MainActivity extends AppCompatActivity {
             player = null;
         }
 
-        // Kill any in-flight resolver WebView
-        if (resolvingWebView != null) {
-            try { root.removeView(resolvingWebView); } catch (Throwable ignored) {}
-            try { resolvingWebView.destroy(); } catch (Throwable ignored) {}
-            resolvingWebView = null;
+        // Kill any in-flight resolver WebViews
+        if (geoNewsWebView != null) {
+            try { root.removeView(geoNewsWebView); } catch (Throwable ignored) {}
+            try { geoNewsWebView.destroy(); } catch (Throwable ignored) {}
+            geoNewsWebView = null;
         }
-        boolean isResolving = false;
+        if (dunyaNewsWebView != null) {
+            try { root.removeView(dunyaNewsWebView); } catch (Throwable ignored) {}
+            try { dunyaNewsWebView.destroy(); } catch (Throwable ignored) {}
+            dunyaNewsWebView = null;
+        }
 
         setStatus("Stopped.");
     }
@@ -199,18 +210,41 @@ public class MainActivity extends AppCompatActivity {
     // ---------------- Geo News flow ----------------
 
     private void playGeoNewsAudio() {
-        setStatus("Resolving Geo News Stream 2…");
-        resolveGeoNewsStream2(new UrlCallback() {
+        setStatus("Resolving Geo News Stream…");
+        resolveGeoNewsStream(new UrlCallback() {
             @Override public void onResolved(String url) {
                 setStatus("Playing Geo News…");
-                playM3u8WithHeaders(url);
+                Map<String, String> headers = new HashMap<>();
+                headers.put("Origin",  "https://live.geo.tv");
+                headers.put("Referer", "https://live.geo.tv/");
+                playM3u8WithHeaders(url, headers);
             }
             @Override public void onError(Throwable t) {
-                Log.e(TAG, "Stream 2 resolution failed", t);
-                setStatus("Couldn’t resolve Stream 2.");
+                Log.e(TAG, "Geo News Stream resolution failed", t);
+                setStatus("Couldn’t resolve Geo News stream.");
             }
         });
     }
+
+    // ---------------- Dunya News flow ----------------
+
+    private void playDunyaNewsAudio() {
+        setStatus("Resolving Dunya News Stream…");
+        resolveDunyaNewsStream(new UrlCallback() {
+            @Override public void onResolved(String url) {
+                setStatus("Playing Dunya News…");
+                Map<String, String> headers = new HashMap<>();
+                headers.put("Origin", "https://dunyanews.tv");
+                headers.put("Referer", "https://dunyanews.tv/");
+                playM3u8WithHeaders(url, headers);
+            }
+            @Override public void onError(Throwable t) {
+                Log.e(TAG, "Dunya News Stream resolution failed", t);
+                setStatus("Couldn’t resolve Dunya News stream.");
+            }
+        });
+    }
+
 
     interface UrlCallback {
         void onResolved(String url);
@@ -218,13 +252,79 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private void resolveGeoNewsStream2(final UrlCallback cb) {
+    private void resolveDunyaNewsStream(final UrlCallback cb) {
+        dunyaNewsWebView = new WebView(this);
+        WebSettings s = dunyaNewsWebView.getSettings();
+        s.setJavaScriptEnabled(true);
+        s.setDomStorageEnabled(true);
+        s.setMediaPlaybackRequiresUserGesture(false); // <— allow autoplay
+        s.setLoadsImagesAutomatically(true);
+        s.setJavaScriptCanOpenWindowsAutomatically(true);
+        s.setAllowContentAccess(true);
+        s.setAllowFileAccess(true);
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
 
-        final WebView webView = new WebView(this);
-        webView.getSettings().setJavaScriptEnabled(true);
-        webView.getSettings().setDomStorageEnabled(true);
-        webView.setVisibility(View.GONE);
-        root.addView(webView, new FrameLayout.LayoutParams(1, 1));
+        dunyaNewsWebView.setVisibility(View.GONE);
+        root.addView(dunyaNewsWebView, new FrameLayout.LayoutParams(1, 1));
+
+        dunyaNewsWebView.setWebViewClient(new WebViewClient() {
+            private boolean kicked = false;
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                // JW Player is used on this page; nudge it to start.
+                if (!kicked) {
+                    kicked = true;
+                    String js =
+                            "(function(){try{" +
+                                    " if(window.jwplayer){ var p=window.jwplayer('uklive'); if(p){ p.play(true); } }" +
+                                    "}catch(e){} return true;})();";
+                    view.evaluateJavascript(js, null);
+                }
+            }
+
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                String u = (request != null && request.getUrl() != null) ? request.getUrl().toString() : "";
+                // Don’t restrict to a single host — just grab any .m3u8
+                if (u.endsWith(".m3u8")) {
+                    runOnUiThread(() -> {
+                        try { cb.onResolved(u); }
+                        catch (Throwable t) { cb.onError(t); }
+                        finally {
+                            if (dunyaNewsWebView != null) {
+                                try { root.removeView(dunyaNewsWebView); } catch (Throwable ignored) {}
+                                dunyaNewsWebView.destroy();
+                                dunyaNewsWebView = null;
+                            }
+                        }
+                    });
+                }
+                return super.shouldInterceptRequest(view, request);
+            }
+        });
+
+        try {
+            dunyaNewsWebView.loadUrl("https://dunyanews.tv/live/");
+        } catch (Throwable t) {
+            cb.onError(t);
+            if (dunyaNewsWebView != null) {
+                try { root.removeView(dunyaNewsWebView); } catch (Throwable ignored) {}
+                dunyaNewsWebView.destroy();
+                dunyaNewsWebView = null;
+            }
+        }
+    }
+
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private void resolveGeoNewsStream(final UrlCallback cb) {
+
+        geoNewsWebView = new WebView(this);
+        geoNewsWebView.getSettings().setJavaScriptEnabled(true);
+        geoNewsWebView.getSettings().setDomStorageEnabled(true);
+        geoNewsWebView.setVisibility(View.GONE);
+        root.addView(geoNewsWebView, new FrameLayout.LayoutParams(1, 1));
 
         // They currently serve HLS from 5centscdn; add more hosts here if they switch.
         final String[] m3u8Hosts = new String[] {
@@ -233,7 +333,7 @@ public class MainActivity extends AppCompatActivity {
                 "cdn", "edge"           // extra safety
         };
 
-        webView.setWebViewClient(new WebViewClient() {
+        geoNewsWebView.setWebViewClient(new WebViewClient() {
             private boolean triedSubmit = false;
 
             @Override
@@ -268,8 +368,11 @@ public class MainActivity extends AppCompatActivity {
                                 try { cb.onResolved(u); }
                                 catch (Throwable t) { cb.onError(t); }
                                 finally {
-                                    try { root.removeView(webView); } catch (Throwable ignored) {}
-                                    webView.destroy();
+                                    if (geoNewsWebView != null) {
+                                        root.removeView(geoNewsWebView);
+                                        geoNewsWebView.destroy();
+                                        geoNewsWebView = null;
+                                    }
                                 }
                             });
                             break;
@@ -281,24 +384,25 @@ public class MainActivity extends AppCompatActivity {
         });
 
         try {
-            webView.loadUrl("https://live.geo.tv/");
+            geoNewsWebView.loadUrl("https://live.geo.tv/");
         } catch (Throwable t) {
             cb.onError(t);
-            try { root.removeView(webView); } catch (Throwable ignored) {}
-            webView.destroy();
+            if (geoNewsWebView != null) {
+                root.removeView(geoNewsWebView);
+                geoNewsWebView.destroy();
+                geoNewsWebView = null;
+            }
         }
     }
 
 
     @OptIn(markerClass = UnstableApi.class)
-    private void playM3u8WithHeaders(String m3u8) {
-        Map<String, String> headers = new HashMap<>();
-        headers.put("Origin",  "https://live.geo.tv");
-        headers.put("Referer", "https://live.geo.tv/");
-
+    private void playM3u8WithHeaders(String m3u8, Map<String, String> headers) {
         DefaultHttpDataSource.Factory dsFactory = new DefaultHttpDataSource.Factory()
-                .setUserAgent("GeoNewsAudio/1.0")
-                .setDefaultRequestProperties(headers);
+                .setUserAgent("GeoNewsAudio/1.0");
+        if (headers != null) {
+            dsFactory.setDefaultRequestProperties(headers);
+        }
 
         HlsMediaSource hls = new HlsMediaSource.Factory(dsFactory)
                 .createMediaSource(MediaItem.fromUri(m3u8));
@@ -328,5 +432,13 @@ public class MainActivity extends AppCompatActivity {
         super.onDestroy();
         if (speechRecognizer != null) speechRecognizer.destroy();
         if (player != null) { player.release(); player = null; }
+        if (geoNewsWebView != null) {
+            geoNewsWebView.destroy();
+            geoNewsWebView = null;
+        }
+        if (dunyaNewsWebView != null) {
+            dunyaNewsWebView.destroy();
+            dunyaNewsWebView = null;
+        }
     }
 }
