@@ -41,6 +41,12 @@ dependencies {
     implementation libs.constraintlayout
     implementation libs.navigation.fragment
     implementation libs.navigation.ui
+    implementation libs.okhttp
+    implementation libs.json
+    // For Fuzzy String Matching (Levenshtein Distance)
+    implementation libs.commons.text
+
+    // For making API calls to Gemini (LLM)
     testImplementation libs.junit
     androidTestImplementation libs.ext.junit
     androidTestImplementation libs.espresso.core
